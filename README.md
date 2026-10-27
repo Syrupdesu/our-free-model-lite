@@ -31,21 +31,43 @@
 
 ## 安装
 
-本包不发布到 npm。用打好的 tgz 装进 DSH 的桌面 profile：
+不发布到 npm，仓库为私有。tgz 的 SHA-256：
 
-```bash
-# 1. 把 tgz 放进 profile 的 vendor 目录
-cp dsh-our-free-model-3.0.0-lite.1.tgz ~/.dsh/profiles/desktop/vendor/
-
-# 2. 让 profile 指向它（替换原来那一行）
-#    ~/.dsh/profiles/desktop/package.json:
-#    "dsh-our-free-model": "file:./vendor/dsh-our-free-model-3.0.0-lite.1.tgz"
-
-# 3. 重装依赖并重启 DSH
-cd ~/.dsh/profiles/desktop && pnpm install
+```
+cfc8dfbe7894204803b9884930e3f6708939e80002b51c442480561678caa66b
 ```
 
-装好后：设置 → Our Free Model，点「刷新清单」，模型即出现在模型选择器里。
+### A. 安装脚本（推荐）
+
+```bash
+# 1. 从私有 Release 取 tgz（gh 已登录 Syrupdesu）
+gh release download v3.0.0-lite.1 -R Syrupdesu/our-free-model-lite --pattern '*.tgz'
+shasum -a 256 dsh-our-free-model-3.0.0-lite.1.tgz   # 应等于上面的值
+
+# 2. 取仓库里的脚本并安装
+git clone https://github.com/Syrupdesu/our-free-model-lite.git
+cd our-free-model-lite
+./scripts/install.sh ../dsh-our-free-model-3.0.0-lite.tgz
+```
+
+脚本会备份原来的插件与 `package.json`/`pnpm-lock.yaml`，改依赖、跑 `pnpm install`、
+校验装上的版本；任何一步失败都会自动回滚。回滚上一版：
+
+```bash
+./scripts/revert.sh ~/.dsh/profiles/desktop/.ofmlite-backup-<时间戳>
+```
+
+### B. 手动
+
+```bash
+cp dsh-our-free-model-3.0.0-lite.1.tgz ~/.dsh/profiles/desktop/vendor/
+# 把 ~/.dsh/profiles/desktop/package.json 里那一行改成：
+#   "dsh-our-free-model": "file:./vendor/dsh-our-free-model-3.0.0-lite.1.tgz"
+cd ~/.dsh/profiles/desktop
+pnpm install --no-frozen-lockfile
+```
+
+装完**重启 DeepSeek Harness**。设置 → Our Free Model → 「刷新清单」，模型即出现在模型选择器里。
 
 ## 数据与出网
 
