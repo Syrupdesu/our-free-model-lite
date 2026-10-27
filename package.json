@@ -1,0 +1,55 @@
+{
+  "name": "dsh-our-free-model",
+  "version": "3.0.0-lite.1",
+  "private": true,
+  "type": "module",
+  "description": "Our Free Model (lite) — 免登录、免注册、免 API Key 的免费模型车道，只保留模型清单、可用性探测与单模型测速。已移除 EAC/GitHub star 门禁、账号渠道、订阅导入、聚合渠道、路由链、省 Token、本地网关、看板、公告、推荐项目与自更新。",
+  "main": "./index.js",
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "adapter",
+    "src",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "free-model",
+    "llm-provider"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-commands": "^0.1.2-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  }
+}
