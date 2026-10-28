@@ -235,14 +235,19 @@ function sessionStorePath() {
 function loadSessions() {
   if (sessions !== undefined) return sessions
   sessions = new Map()
+  const file = sessionStorePath()
+  if (file === undefined) return sessions
   try {
-    const file = sessionStorePath()
-    if (file === undefined) return sessions
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
     for (const [seed, id] of Object.entries(parsed?.sessions ?? {})) {
       if (typeof id === 'string' && SESSION_RE.test(id)) sessions.set(seed, id)
     }
   } catch { /* first run or unreadable store: start empty */ }
+  // These ids are the lane's quota identity; heal a store written before the
+  // mode was set (older builds left it at the process umask, usually 0644).
+  try { fs.chmodSync(file, 0o600) } catch { /* absent, or not ours to chmod */ }
+  // An older build's crash could leave this pre-rename copy behind.
+  try { fs.chmodSync(`${file}.tmp`, 0o600) } catch { /* absent */ }
   return sessions
 }
 
@@ -251,9 +256,9 @@ function rememberSession(seed, id) {
   try {
     const file = sessionStorePath()
     if (file === undefined) return
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    const temp = `${file}.tmp`
-    fs.writeFileSync(temp, JSON.stringify({ version: 1, at: Date.now(), sessions: Object.fromEntries(sessions) }, undefined, 2))
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+    const temp = `${file}.${process.pid}.tmp`
+    fs.writeFileSync(temp, JSON.stringify({ version: 1, at: Date.now(), sessions: Object.fromEntries(sessions) }, undefined, 2), { mode: 0o600 })
     fs.renameSync(temp, file)
   } catch { /* non-fatal: the id still works, it just will not survive a restart */ }
 }

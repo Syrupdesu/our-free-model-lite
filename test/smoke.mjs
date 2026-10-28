@@ -1,8 +1,8 @@
 /**
  * Offline smoke test for the lite build.
  *
- * It answers three questions without touching the real upstream:
- *   1. no removed feature survived in code (no EAC/vault/updater/ads/login),
+ * It answers five questions without touching the real upstream:
+ *   1. no removed-feature entry point survived in code (no EAC/vault/updater/ads/login),
  *   2. the modules load and the adapter advertises a catalog,
  *   3. the host half applies under a stub ctx and serves the settings API,
  *      including validation and the per-model test error path.
@@ -35,14 +35,15 @@ for (const file of [...CODE.map(name => path.join(pkg, name)), ...walk(path.join
   if (!fs.existsSync(file)) continue
   const text = fs.readFileSync(file, 'utf8')
   for (const banned of [
-    'beichenapi', 'SPONSOR', 'github.com/login', 'oauth/authorize', 'x-ofm-user',
+    'beichenapi', 'SPONSOR', 'github.com/login', 'api.github.com', 'oauth/authorize',
+    'oauth/access_token', '/releases/latest', '/releases/download', 'x-ofm-user',
     "from './eac", "from './vault", "from './updater", "from './feed", "from './picks",
     'LANE_SEAL', 'announcements.json', 'child_process', 'createHmac',
   ]) {
     assert.equal(text.includes(banned), false, `${path.relative(pkg, file)} still references ${banned}`)
   }
 }
-console.log('ok  static scan: no removed feature survives')
+console.log('ok  static scan: no removed-feature entry point survives')
 
 // ── 2. modules + adapter ─────────────────────────────────────────────────────
 const { buildCatalog, buildKiloCatalog } = await import(path.join(pkg, 'src/catalog.js'))
@@ -71,13 +72,26 @@ console.log('ok  adapter lists and resolves catalog rows')
 // ── 3. client bundle ─────────────────────────────────────────────────────────
 {
   let exports
-  globalThis.window = { __ModuleLoader__: { load: ({ factory }) => { exports = factory(name => (name === 'react' ? { createElement: () => null, Fragment: null, useState: () => [], useEffect: () => {}, useCallback: fn => fn, useMemo: fn => fn() } : {})) } } }
+  globalThis.window = { __ModuleLoader__: { load: ({ factory }) => { exports = factory(name => (name === 'react' ? {
+    createElement: (type, props, ...children) => ({ type, props, children }),
+    Fragment: null,
+    useState: () => [],
+    useEffect: () => {},
+    useCallback: fn => fn,
+    useMemo: fn => fn(),
+  } : {})) } } }
   await import(path.join(pkg, 'client.js'))
   assert.equal(exports.name, 'our-free-model')
   assert.equal(typeof exports.apply, 'function')
   assert.deepEqual(exports.inject, ['slots', 'locale'])
+  const { ModelRow } = exports.__test
+  const t = key => key
+  const model = { id: 'm', name: 'M', contextWindow: 131072, maxOutput: 32768, state: 'available' }
+  const tree = result => JSON.stringify(ModelRow({ t, model, busy: result.running === true, result, onTest() {} }))
+  assert.equal(tree({ running: true }).includes('test.fail'), false, 'a running test is not rendered as a failure')
+  assert.ok(tree({ running: false, ok: false, error: 'boom' }).includes('test.fail'), 'a finished failure is still rendered')
   delete globalThis.window
-  console.log('ok  client bundle registers')
+  console.log('ok  client bundle registers; test rows render running and failure states')
 }
 
 // ── 4. host apply + HTTP ─────────────────────────────────────────────────────
@@ -149,6 +163,20 @@ assert.equal(typeof result.error, 'string')
 const missing = await fetch(`${base}/nope`)
 assert.equal(missing.status, 404)
 console.log('ok  host API: summary, settings validation, test error path, 404')
+
+// ── 5. trust fence ───────────────────────────────────────────────────────────
+{
+  const { rejectionFor } = await import(path.join(pkg, 'src/trust.js'))
+  const loopback = { headers: { host: '127.0.0.1:4100' } }
+  assert.equal(rejectionFor(loopback, undefined), undefined, 'absent connection falls back to the structural fence')
+  assert.equal(rejectionFor(loopback, {}), 503, 'a connection service without an admission method fails closed')
+  assert.equal(rejectionFor(loopback, { requestRejection: () => undefined }), undefined, 'a requestRejection-only host is honoured')
+  assert.equal(rejectionFor(loopback, { requestRejection: () => 401 }), 401, 'its rejection status is passed through')
+  assert.equal(rejectionFor(loopback, { admit: () => ({}) }), undefined, 'an admit success is not a rejection')
+  assert.equal(rejectionFor(loopback, { admit: () => ({ rejection: 403 }) }), 403, 'an admit rejection is passed through')
+  assert.equal(rejectionFor({ headers: { host: 'evil.example' } }, undefined), 403, 'a non-loopback Host is refused')
+  console.log('ok  trust fence: structural fallback, fail-closed on a contract break')
+}
 
 await new Promise(resolve => server.close(resolve))
 for (const dispose of disposers) { try { dispose() } catch {} }

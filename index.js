@@ -93,6 +93,8 @@ export function apply(ctx, config) {
   const home = resolveDshHome()
   const dataDir = path.resolve(home, DATA_DIR_NAME)
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+  // `mode` only applies on creation; an older install's directory keeps 0755.
+  try { fs.chmodSync(dataDir, 0o700) } catch { /* the files inside are 0600 regardless */ }
 
   const stores = createRuntimeStores({ dataDir, logger })
   const { settings } = stores
@@ -104,7 +106,12 @@ export function apply(ctx, config) {
 
   const packageVersion = version
   let disposed = false
-  const connection = () => (typeof ctx.get === 'function' ? ctx.get('connection') : undefined)
+  // An unreadable service is not an absent one: hand the fence an empty object
+  // so it fails closed instead of dropping the host's browser authentication.
+  const connection = () => {
+    if (typeof ctx.get !== 'function') return undefined
+    try { return ctx.get('connection') } catch { return {} }
+  }
 
   // ── registration ────────────────────────────────────────────────────────────
   ctx.llm.registerAdapter([ROUTE_MAIN, ROUTE_REGION], runtime.adapter)
@@ -155,7 +162,9 @@ export function apply(ctx, config) {
       res.end(body)
     }
 
-    const rejection = rejectionFor(req, connection())
+    const rejection = rejectionFor(req, connection(), decision => {
+      if (decision.status >= 500) logger.warn?.(`our-free-model: request admission failed (${decision.source}: ${decision.reason})`)
+    })
     if (rejection !== undefined) {
       return send(rejection, { error: rejection === 401 ? 'unauthorized' : rejection === 503 ? 'admission unavailable' : 'forbidden' })
     }

@@ -209,7 +209,7 @@ window.__ModuleLoader__.load({
     function ModelRow({ t, model, busy, result, onTest }) {
       const context = Math.round((model.contextWindow ?? 0) / 1024)
       const output = Math.round((model.maxOutput ?? 0) / 1024)
-      const showTest = result !== undefined && result !== null
+      const showTest = result !== undefined && result !== null && result.running !== true
       return h('div', { className: 'ofmlite_row' },
         h('div', { className: 'ofmlite_rowmain' },
           h('div', { className: 'ofmlite_rowtitle' },

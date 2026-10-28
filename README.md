@@ -27,27 +27,23 @@
 | 路由降级链、省 Token、本地/局域网网关 | 与「开箱即用的免费模型」无关 |
 | 看板、运行日志、模型工作台 | 同上；本插件不再写任何统计文件 |
 
-代码里**没有任何**远程安装、热更新、公告拉取、星标校验或 GitHub 登录路径。全文搜索 `github`、`star`、`sponsor`、`beichenapi`、`eac`、`vault`、`updater` 应为 0 命中（`LICENSE`/文档除外），由 `npm test` 校验。
+代码里**没有任何**远程安装、热更新、公告拉取、星标校验或 GitHub 登录路径。`npm test` 会扫描这些能力的入口标记（GitHub 登录/OAuth、Release 下载、自更新、公告文件、赞助网关、HMAC 签名、子进程等）；源码注释和出处链接里出现 `EAC`、`github.com/...` 字样只是署名或历史说明，不是功能。
 
 ## 安装
 
-不发布到 npm，仓库为私有。tgz 的 SHA-256：
-
-```
-cfc8dfbe7894204803b9884930e3f6708939e80002b51c442480561678caa66b
-```
+不发布到 npm，仓库为私有。tgz 用 `npm pack` 生成；SHA-256 以 Release 页公布的值（或本地 `shasum -a 256` 的输出）为准——README 本身也在包里，不能内嵌自己的哈希。
 
 ### A. 安装脚本（推荐）
 
 ```bash
-# 1. 从私有 Release 取 tgz（gh 已登录 Syrupdesu）
-gh release download v3.0.0-lite.1 -R Syrupdesu/our-free-model-lite --pattern '*.tgz'
-shasum -a 256 dsh-our-free-model-3.0.0-lite.1.tgz   # 应等于上面的值
-
-# 2. 取仓库里的脚本并安装
+# 1. 在仓库里本地打包（v3.0.0-lite.2 尚未发布为 Release）
 git clone https://github.com/Syrupdesu/our-free-model-lite.git
 cd our-free-model-lite
-./scripts/install.sh ../dsh-our-free-model-3.0.0-lite.tgz
+npm pack --silent
+shasum -a 256 dsh-our-free-model-3.0.0-lite.2.tgz   # 记下输出，供分发时核对
+
+# 2. 安装
+./scripts/install.sh dsh-our-free-model-3.0.0-lite.2.tgz
 ```
 
 脚本会备份原来的插件与 `package.json`/`pnpm-lock.yaml`，改依赖、跑 `pnpm install`、
@@ -60,9 +56,9 @@ cd our-free-model-lite
 ### B. 手动
 
 ```bash
-cp dsh-our-free-model-3.0.0-lite.1.tgz ~/.dsh/profiles/desktop/vendor/
+cp dsh-our-free-model-3.0.0-lite.2.tgz ~/.dsh/profiles/desktop/vendor/
 # 把 ~/.dsh/profiles/desktop/package.json 里那一行改成：
-#   "dsh-our-free-model": "file:./vendor/dsh-our-free-model-3.0.0-lite.1.tgz"
+#   "dsh-our-free-model": "file:./vendor/dsh-our-free-model-3.0.0-lite.2.tgz"
 cd ~/.dsh/profiles/desktop
 pnpm install --no-frozen-lockfile
 ```
@@ -71,7 +67,7 @@ pnpm install --no-frozen-lockfile
 
 ## 数据与出网
 
-- 设置/缓存写在 `~/.dsh/our-free-model/`（`settings.json`、`catalog.json`、`availability.json`，0600）。
+- 设置/缓存写在 `~/.dsh/our-free-model/`（目录 0700，文件 0600：`settings.json`、`catalog.json`、`availability.json`、`session-map.json`）。
 - 出网只有三处：`opencode.ai`（模型清单与对话）、Kilo 网关（清单与对话）、探测出口 IP 用到的 `api.ipify.org` / `ipinfo.io` / `ipapi.co`（任一可用即停，失败就跳过）。
 - 不写统计、不上报、不拉公告、不检查更新。
 
