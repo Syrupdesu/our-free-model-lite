@@ -31,6 +31,7 @@ const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry =
   if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : walk(full)
   return /\.(js|mjs|json|yml|yaml)$/.test(entry.name) ? [full] : []
 })
+const BUN_WORKER = path.join(pkg, 'src/bun-fetch.js')
 for (const file of [...CODE.map(name => path.join(pkg, name)), ...walk(path.join(pkg, 'src')), ...walk(path.join(pkg, 'adapter'))]) {
   if (!fs.existsSync(file)) continue
   const text = fs.readFileSync(file, 'utf8')
@@ -38,10 +39,16 @@ for (const file of [...CODE.map(name => path.join(pkg, name)), ...walk(path.join
     'beichenapi', 'SPONSOR', 'github.com/login', 'api.github.com', 'oauth/authorize',
     'oauth/access_token', '/releases/latest', '/releases/download', 'x-ofm-user',
     "from './eac", "from './vault", "from './updater", "from './feed", "from './picks",
-    'LANE_SEAL', 'announcements.json', 'child_process', 'createHmac',
+    'LANE_SEAL', 'announcements.json', 'createHmac',
+    // The only permitted spawn is the Bun worker below: fixed argv, no shell.
+    ...(file === BUN_WORKER ? [] : ['child_process']),
   ]) {
     assert.equal(text.includes(banned), false, `${path.relative(pkg, file)} still references ${banned}`)
   }
+}
+const bunWorker = fs.readFileSync(BUN_WORKER, 'utf8')
+for (const banned of ['shell:', 'exec(', 'execSync', 'execFile', 'process.env.OUR_FREE_MODEL_FREE_TRANSPORT=']) {
+  assert.equal(bunWorker.includes(banned), false, `src/bun-fetch.js still references ${banned}`)
 }
 console.log('ok  static scan: no removed-feature entry point survives')
 
@@ -179,6 +186,103 @@ console.log('ok  host API: summary, settings validation, test error path, 404')
 }
 
 await new Promise(resolve => server.close(resolve))
+
+// ── 6. free lane: environment context and Bun transport ──────────────────────
+{
+  const { applyFingerprint, ensureFreeLaneEnvironment } = await import(path.join(pkg, 'src/upstream.js'))
+  const body = { messages: [{ role: 'system', content: 'Caller rules' }, { role: 'user', content: 'ping' }] }
+  applyFingerprint(body, false)
+  assert.ok(body.messages[0].content.startsWith('Caller rules'), "the caller's system text is kept")
+  assert.match(body.messages[0].content, /<env>[\s\S]*Working directory: /, 'the lane gets environment context')
+  applyFingerprint(body, false)
+  assert.equal(body.messages[0].content.match(/<env>/g).length, 1, 're-applying never stacks env blocks')
+
+  const callerEnv = { messages: [{ role: 'developer', content: '<env>Caller environment</env>' }] }
+  ensureFreeLaneEnvironment(callerEnv, false, { directory: '/tmp/x', platform: 'test' })
+  assert.deepEqual(callerEnv.messages, [{ role: 'developer', content: '<env>Caller environment</env>' }], "a caller's env block wins")
+
+  const block = { type: 'text', text: 'Original block', cache_control: { type: 'ephemeral' } }
+  const claude = { system: [block] }
+  applyFingerprint(claude, 'claude')
+  assert.equal(claude.system[0], block, 'a cache-controlled system block survives by reference')
+  assert.ok(claude.system.some(part => part.text.includes('<env>')), 'the block list gains the env text')
+
+  const flattened = { instructions: 'Original instructions' }
+  applyFingerprint(flattened, true)
+  assert.ok(flattened.instructions.startsWith('Original instructions'))
+  assert.ok(flattened.instructions.includes('<env>'))
+
+  // The flat wire keeps the caller's system text in `input`, not `instructions`.
+  const flatInput = { input: [{ type: 'message', role: 'system', content: [{ type: 'input_text', text: '<env>Workspace: /work</env>' }] }] }
+  applyFingerprint(flatInput, true)
+  assert.equal(/<env>/.test(flatInput.instructions ?? ''), false, "the caller's input env block is found and no second one is added")
+  console.log('ok  free lane: env context appended without replacing caller system text')
+}
+
+{
+  const { postStreamed, UpstreamError, CODE } = await import(path.join(pkg, 'src/http.js'))
+  const previous = process.env.OUR_FREE_MODEL_FREE_TRANSPORT
+  process.env.OUR_FREE_MODEL_FREE_TRANSPORT = 'bogus'
+  try {
+    await assert.rejects(
+      () => postStreamed({ path: '/inference/v1/chat/completions', body: {}, session: 'smoke' }),
+      error => error instanceof UpstreamError && error.code === CODE.client,
+      'a mistyped transport name is a configuration error, not a retryable one',
+    )
+  } finally {
+    if (previous === undefined) delete process.env.OUR_FREE_MODEL_FREE_TRANSPORT
+    else process.env.OUR_FREE_MODEL_FREE_TRANSPORT = previous
+  }
+
+  const { bunFetch, findBunExecutable } = await import(path.join(pkg, 'src/bun-fetch.js'))
+  const executable = findBunExecutable()
+  if (executable === undefined) {
+    console.log('skip bun transport: no Bun executable on this machine (the lane reports it as a configuration error)')
+  } else {
+    const echo = http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.write('first ')
+      setTimeout(() => res.end('second'), 10)
+    })
+    await new Promise(resolve => echo.listen(0, '127.0.0.1', resolve))
+    try {
+      const response = await bunFetch(`http://127.0.0.1:${echo.address().port}/`, {
+        method: 'POST', body: '{"ping":1}', headers: { 'content-type': 'application/json' },
+      })
+      assert.equal(response.status, 200)
+      assert.equal(await response.text(), 'first second', 'the worker streams the response body')
+    } finally {
+      await new Promise(resolve => echo.close(resolve))
+    }
+    console.log('ok  free lane: bun worker carries a streamed response')
+  }
+
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-fake-bun-'))
+  try {
+    const fake = path.join(scratch, 'fake-bun')
+    fs.writeFileSync(fake, '#!/bin/sh\nprintf \'{"error":"ENOTFOUND"}\\n\'\nexit 1\n', { mode: 0o700 })
+    await assert.rejects(
+      () => bunFetch('http://127.0.0.1:1/', { method: 'GET' }, { executable: fake }),
+      /Bun worker failed: ENOTFOUND/,
+      'a worker failure keeps its cause class',
+    )
+
+    // A failure after the metadata line must not be written into the body.
+    const late = path.join(scratch, 'fake-bun-late')
+    fs.writeFileSync(late, '#!/bin/sh\ncat > /dev/null\nprintf \'{"status":200,"statusText":"OK","headers":[["content-type","text/plain"]]}\\npartial\'\nexit 1\n', { mode: 0o700 })
+    const truncated = await bunFetch('http://127.0.0.1:1/', { method: 'GET' }, { executable: late })
+    assert.equal(truncated.status, 200)
+    let seen = ''
+    await assert.rejects(async () => {
+      for await (const chunk of truncated.body) seen += Buffer.from(chunk).toString()
+    }, /Bun worker failed/, 'a truncated stream fails instead of ending cleanly')
+    assert.equal(seen, 'partial', 'a late failure never appends a diagnostic line to the body')
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true })
+  }
+  console.log('ok  free lane: worker failures carry a cause class')
+}
+
 for (const dispose of disposers) { try { dispose() } catch {} }
 await new Promise(resolve => setTimeout(resolve, 50))
 console.log('ok  teardown')

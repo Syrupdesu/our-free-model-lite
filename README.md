@@ -27,23 +27,31 @@
 | 路由降级链、省 Token、本地/局域网网关 | 与「开箱即用的免费模型」无关 |
 | 看板、运行日志、模型工作台 | 同上；本插件不再写任何统计文件 |
 
-代码里**没有任何**远程安装、热更新、公告拉取、星标校验或 GitHub 登录路径。`npm test` 会扫描这些能力的入口标记（GitHub 登录/OAuth、Release 下载、自更新、公告文件、赞助网关、HMAC 签名、子进程等）；源码注释和出处链接里出现 `EAC`、`github.com/...` 字样只是署名或历史说明，不是功能。
+代码里**没有任何**远程安装、热更新、公告拉取、星标校验或 GitHub 登录路径。`npm test` 会扫描这些能力的入口标记（GitHub 登录/OAuth、Release 下载、自更新、公告文件、赞助网关、HMAC 签名等），并限定整包只有 `src/bun-fetch.js` 一处 `child_process`：固定 argv、无 shell，仅用于把官方车道的请求交给本机 Bun。源码注释和出处链接里出现 `EAC`、`github.com/...` 字样只是署名或历史说明，不是功能。
 
 ## 安装
+
+先装 Bun：官方网关对同一份请求，Node 的 `fetch` 回 429、Bun 的 `fetch` 回 200（2026-10-28 实测，见上游 `d72271b`），所以免费车道的对话请求经过本机 Bun 发出。
+
+```bash
+brew install bun            # 或 curl -fsSL https://bun.sh/install | bash
+```
+
+找不到 Bun 时插件会明确报配置错误（`CLIENT_ERROR`，告诉你装 Bun 或设 `OUR_FREE_MODEL_BUN`），不会静默失败；brew 装到 `/opt/homebrew/bin`（或 `/usr/local/bin`）的 Bun 会被自动找到，不依赖应用继承的 PATH。`OUR_FREE_MODEL_FREE_TRANSPORT=node` 可回到旧传输，但那条路目前就是 429。
 
 不发布到 npm，仓库为私有。tgz 用 `npm pack` 生成；SHA-256 以 Release 页公布的值（或本地 `shasum -a 256` 的输出）为准——README 本身也在包里，不能内嵌自己的哈希。
 
 ### A. 安装脚本（推荐）
 
 ```bash
-# 1. 在仓库里本地打包（v3.0.0-lite.2 尚未发布为 Release）
+# 1. 在仓库里本地打包（v3.0.0-lite.3 尚未发布为 Release）
 git clone https://github.com/Syrupdesu/our-free-model-lite.git
 cd our-free-model-lite
 npm pack --silent
-shasum -a 256 dsh-our-free-model-3.0.0-lite.2.tgz   # 记下输出，供分发时核对
+shasum -a 256 dsh-our-free-model-3.0.0-lite.3.tgz   # 记下输出，供分发时核对
 
 # 2. 安装
-./scripts/install.sh dsh-our-free-model-3.0.0-lite.2.tgz
+./scripts/install.sh dsh-our-free-model-3.0.0-lite.3.tgz
 ```
 
 脚本会备份原来的插件与 `package.json`/`pnpm-lock.yaml`，改依赖、跑 `pnpm install`、
@@ -56,14 +64,42 @@ shasum -a 256 dsh-our-free-model-3.0.0-lite.2.tgz   # 记下输出，供分发�
 ### B. 手动
 
 ```bash
-cp dsh-our-free-model-3.0.0-lite.2.tgz ~/.dsh/profiles/desktop/vendor/
+cp dsh-our-free-model-3.0.0-lite.3.tgz ~/.dsh/profiles/desktop/vendor/
 # 把 ~/.dsh/profiles/desktop/package.json 里那一行改成：
-#   "dsh-our-free-model": "file:./vendor/dsh-our-free-model-3.0.0-lite.2.tgz"
+#   "dsh-our-free-model": "file:./vendor/dsh-our-free-model-3.0.0-lite.3.tgz"
 cd ~/.dsh/profiles/desktop
 pnpm install --no-frozen-lockfile
 ```
 
 装完**重启 DeepSeek Harness**。设置 → Our Free Model → 「刷新清单」，模型即出现在模型选择器里。
+
+## 同步上游
+
+本仓库的历史是压平的单个提交，和上游没有共同祖先，所以不要 `git merge upstream/main`——那是无关历史合并，会把已经删掉的功能整包带回来。同步是把上游对**保留文件**的改动挑过来：
+
+```bash
+git remote add upstream https://github.com/Ebony-Vinyl/dsh-our-free-model   # 只需一次
+git fetch upstream --tags
+git diff --stat <基线提交>..upstream/main -- index.js client.js src/upstream.js src/http.js src/bun-fetch.js
+```
+
+基线提交记在 [NOTICE.md](NOTICE.md)。落盘方式：
+
+```bash
+git diff <基线>..<上游提交> -- src/upstream.js | git apply -3
+git show <上游提交>:src/bun-fetch.js > src/bun-fetch.js.new && mv src/bun-fetch.js.new src/bun-fetch.js   # 新文件，再重放本地那两处改动
+```
+
+- `rememberSession` 一带会被本仓库的 0600 加固挡住，合并时保留 `mode: 0o600` 和 pid 临时文件。
+- `src/bun-fetch.js` 是本仓库唯一改过的上游文件：worker 失败时多写一行仅含错误类别的 `{"error":…}`，让诊断回到「谁连不上」而不是笼统的「worker 失败」。整份覆盖后要把 worker 的 `catch` 与父进程的 `meta.error` 分支补回来。
+- `src/http.js` 在上游经 `src/egress.js` 选择传输，本仓库没有 egress，所以 `laneFetch` 直接放在 `src/http.js` 里；这一处要手工改，不能整份照搬。
+- 上游对 `client.js` / `index.js` 的改动目前都落在已删除的功能里（升级页、自更新、出站中继），一般整段跳过。
+- 合完先 `npm test`，再跑一次真实传输对照（期望 node 429、bun 200）：
+
+```bash
+OUR_FREE_MODEL_FREE_TRANSPORT=node node scripts/lane-ab.mjs
+OUR_FREE_MODEL_FREE_TRANSPORT=bun  node scripts/lane-ab.mjs
+```
 
 ## 数据与出网
 

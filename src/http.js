@@ -23,6 +23,7 @@
  */
 
 import { CLIENT_UA, UPSTREAM_BASE, gatewayHeaders, truncateSession } from './upstream.js'
+import { bunFetch, findBunExecutable } from './bun-fetch.js'
 
 /** Harness-neutral failure codes (packages/llm/llm/src/error.ts vocabulary; CLIENT_ERROR extends it like CONFIG_DISABLED does). */
 export const CODE = {
@@ -375,13 +376,34 @@ function userAgentWith(_attribution) {
   return CLIENT_UA
 }
 
+/**
+ * The lane's socket. The same fingerprint body that Node's `fetch` answers with
+ * 429 comes back 200 through Bun (measured upstream 2026-10-28), so the
+ * official lane walks out through a Bun worker; `OUR_FREE_MODEL_FREE_TRANSPORT
+ * =node` restores the legacy transport. Only this module is the official lane,
+ * so no URL test is needed here — catalogs and probes keep plain `fetch`.
+ */
+async function laneFetch(url, init) {
+  const transport = (process.env.OUR_FREE_MODEL_FREE_TRANSPORT ?? '').trim() || 'auto'
+  if (transport === 'node') return fetch(url, init)
+  if (transport !== 'auto' && transport !== 'bun') {
+    throw new UpstreamError('our-free-model: OUR_FREE_MODEL_FREE_TRANSPORT must be auto, bun, or node', CODE.client)
+  }
+  const executable = findBunExecutable()
+  if (executable === undefined) {
+    throw new UpstreamError('our-free-model: the free lane needs a local Bun executable — install bun or set OUR_FREE_MODEL_BUN (OUR_FREE_MODEL_FREE_TRANSPORT=node restores the legacy transport)', CODE.client)
+  }
+  return bunFetch(url, init, { executable })
+}
+
 export async function postStreamed({ path, body, session, attributionUserAgent, signal, onData, timeoutMs = 300000 }) {
   const headers = gatewayHeaders({ session: truncateSession(session), stream: true })
   headers['user-agent'] = userAgentWith(attributionUserAgent)
   let response
   try {
-    response = await fetch(`${UPSTREAM_BASE}${path}`, { method: 'POST', headers, body: JSON.stringify(body), redirect: 'error', signal })
+    response = await laneFetch(`${UPSTREAM_BASE}${path}`, { method: 'POST', headers, body: JSON.stringify(body), redirect: 'error', signal })
   } catch (error) {
+    if (error instanceof UpstreamError) throw error
     // The signal's own reason is what fetch rejects with, and Node's is a
     // `TimeoutError`/user Error rather than `AbortError` — testing the name alone
     // reported a cancelled turn as `TRANSPORT`, which is retryable.
@@ -562,7 +584,7 @@ export async function getJson(path, { session, attributionUserAgent, signal, tim
   const onCallerAbort = () => { callerAborted = true; controller.abort() }
   signal?.addEventListener('abort', onCallerAbort, { once: true })
   try {
-    const response = await fetch(`${UPSTREAM_BASE}${path}`, { headers, redirect: 'error', signal: controller.signal })
+    const response = await laneFetch(`${UPSTREAM_BASE}${path}`, { headers, redirect: 'error', signal: controller.signal })
     const text = await response.text()
     let payload
     try { payload = JSON.parse(text) } catch { payload = { error: { message: text.slice(0, 200) } } }

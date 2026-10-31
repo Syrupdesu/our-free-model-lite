@@ -5,6 +5,9 @@ and its contributors, licensed under the MIT License:
 
 - Upstream: https://github.com/Ebony-Vinyl/dsh-our-free-model
 - Base version: 2.7.2
+- Base commit: `38648bf` (2026-10-27), the tree this fork was cut from
+- Ported after the cut: `d72271b` (2026-10-29), the free-lane repair — Bun
+  transport, environment context, and session identity; see README「同步上游」
 
 The MIT copyright notice for the upstream project is retained verbatim in
 [LICENSE](LICENSE).

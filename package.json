@@ -1,12 +1,12 @@
 {
   "name": "dsh-our-free-model",
-  "version": "3.0.0-lite.2",
+  "version": "3.0.0-lite.3",
   "private": true,
   "type": "module",
   "description": "Our Free Model (lite) — 免登录、免注册、免 API Key 的免费模型车道，只保留模型清单、可用性探测与单模型测速。已移除 EAC/GitHub star 门禁、账号渠道、订阅导入、聚合渠道、路由链、省 Token、本地网关、看板、公告、推荐项目与自更新。",
   "main": "./index.js",
   "scripts": {
-    "test": "node test/smoke.mjs"
+    "test": "node test/sessions.mjs && node test/smoke.mjs"
   },
   "exports": {
     ".": "./index.js",

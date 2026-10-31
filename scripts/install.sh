@@ -2,13 +2,13 @@
 # Install this lite build into a DSH desktop profile, with a backup and a
 # restore-on-failure trap.
 #
-#   ./scripts/install.sh /path/to/dsh-our-free-model-3.0.0-lite.2.tgz
+#   ./scripts/install.sh /path/to/dsh-our-free-model-3.0.0-lite.3.tgz
 #
 # The profile defaults to ~/.dsh/profiles/desktop; override with DSH_PROFILE_DIR.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="3.0.0-lite.2"
+VERSION="3.0.0-lite.3"
 TGZ="${1:-$HERE/dsh-our-free-model-${VERSION}.tgz}"
 PROFILE="${DSH_PROFILE_DIR:-$HOME/.dsh/profiles/desktop}"
 
